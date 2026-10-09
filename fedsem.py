@@ -49,6 +49,8 @@ def encode_class_names(class_names, templates, backend='openai', model_name=None
     if backend == 'openai':
         import clip
         model, _ = clip.load(model_name or 'ViT-B/32', device=device)
+        # clip.load gives fp16 weights on GPU, keep fp32 so the embeddings do not depend on the device
+        model = model.float()
         encode = lambda prompts: model.encode_text(clip.tokenize(prompts).to(device))
     elif backend == 'hf':
         from transformers import CLIPModel, CLIPTokenizer
@@ -73,6 +75,7 @@ def semantic_etf_anchors(num_classes, dim, lam, text_emb=None, shuffle=False, se
     text_emb: C x D prompt-ensembled CLIP embeddings u_k (only needed when lam > 0)
     '''
     C = num_classes
+    assert 0 <= lam <= 1, 'FedSem needs lambda in [0, 1], got {}'.format(lam)
     assert dim >= C, 'FedSem needs anchor dimension d >= C, got d={} and C={}'.format(dim, C)
     one = torch.ones(C, C, dtype=torch.float64)
     I = torch.eye(C, dtype=torch.float64)
@@ -100,8 +103,11 @@ def semantic_etf_anchors(num_classes, dim, lam, text_emb=None, shuffle=False, se
     assert torch.allclose(torch.matmul(T, T.T), G, atol=1e-6), torch.max(torch.abs(torch.matmul(T, T.T) - G))
 
     if shuffle:
-        # control: Pi T_lambda, identical geometry but wrong class assignment
-        T = T[torch.randperm(C, generator=generator)]
+        # control: Pi T_lambda, identical geometry but wrong class assignment, so no class keeps its own anchor
+        perm = torch.randperm(C, generator=generator)
+        while (perm == torch.arange(C)).any():
+            perm = torch.randperm(C, generator=generator)
+        T = T[perm]
 
     return T.float()
 
@@ -110,12 +116,14 @@ def build_fedsem_anchors(args, train_set, num_classes, dim):
     '''
     server side, once: clients never run CLIP, they only receive the C x d anchor matrix
     '''
+    assert args.fedsem_scale > 0, 'FedSem needs a logit scale s > 0'
     text_emb = None
     if args.fedsem_lambda > 0:
         class_names = get_class_names(train_set)
         if args.fedsem_text_emb and os.path.exists(args.fedsem_text_emb):
             cache = torch.load(args.fedsem_text_emb)
-            assert cache['class_names'] == class_names, 'cached text embeddings were computed for different class names'
+            assert (cache['class_names'], cache['templates'], cache['clip_backend'], cache['clip_model']) == (class_names, CLIP_TEMPLATES, args.clip_backend, args.clip_model), \
+                'cached text embeddings were computed with different class names, templates or CLIP model'
             text_emb = cache['text_emb']
         else:
             # keep the RNG stream identical with and without CLIP (e.g. lambda = 0 vs. lambda > 0, cache hit vs. miss)
@@ -123,8 +131,11 @@ def build_fedsem_anchors(args, train_set, num_classes, dim):
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
                 text_emb = encode_class_names(class_names, CLIP_TEMPLATES, args.clip_backend, args.clip_model, device)
             if args.fedsem_text_emb:
+                # write then rename, so parallel runs never read a half-written cache
+                tmp_path = '{}.{}.tmp'.format(args.fedsem_text_emb, os.getpid())
                 torch.save({'class_names': class_names, 'templates': CLIP_TEMPLATES, 'clip_backend': args.clip_backend,
-                            'clip_model': args.clip_model, 'text_emb': text_emb}, args.fedsem_text_emb)
+                            'clip_model': args.clip_model, 'text_emb': text_emb}, tmp_path)
+                os.replace(tmp_path, args.fedsem_text_emb)
         assert text_emb.shape[0] == num_classes
 
     anchors = semantic_etf_anchors(num_classes, dim, args.fedsem_lambda, text_emb, bool(args.fedsem_shuffle), args.random_seed)

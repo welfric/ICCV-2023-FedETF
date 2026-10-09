@@ -2,7 +2,8 @@ import argparse
 
 
 def args_parser():
-    parser = argparse.ArgumentParser()
+    # no abbreviated flags, main.py matches the full flag names to decide what the command line sets
+    parser = argparse.ArgumentParser(allow_abbrev=False)
 
     # Data
     parser.add_argument('--iid', type=int, default=0,
