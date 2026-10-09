@@ -57,6 +57,16 @@ def Client_update(args, client_nodes, central_node, select_list):
             client_losses.append(sum(epoch_losses)/len(epoch_losses))
             train_loss = sum(client_losses)/len(client_losses)
 
+    elif args.client_method == 'fedsem':
+        client_losses = []
+        for i in select_list:
+            epoch_losses = []
+            for epoch in range(args.E):
+                loss = client_fedsem(args, client_nodes[i])
+                epoch_losses.append(loss)
+            client_losses.append(sum(epoch_losses)/len(epoch_losses))
+            train_loss = sum(client_losses)/len(client_losses)
+
     elif args.client_method == 'fedprox':
         global_model_param = copy.deepcopy(list(central_node.model.parameters()))
         client_losses = []
@@ -271,6 +281,38 @@ def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0):
         elif opt == 'celoss':
             # For local personalization
             loss_local =  F.cross_entropy(output_local, target)
+
+        loss_local.backward()
+        loss = loss + loss_local.item()
+        node.optimizer.step()
+
+    return loss/len(train_loader)
+
+# FedSem
+def client_fedsem(args, node, loss = 0.0):
+    node.model.train()
+
+    loss = 0.0
+    train_loader = node.local_data
+    for idx, (data, target) in enumerate(train_loader):
+        # zero_grad
+        node.optimizer.zero_grad()
+        # train model
+
+        data, target = data.cuda(), target.cuda()
+        # unit-norm feature f = P phi(x) / ||P phi(x)||
+        feature, _, _ = node.model(data)
+
+        # logits z = s T_lambda f, only the backbone and the projector are trained
+        output_local = args.fedsem_scale * node.model.semantic_classifier(feature)
+
+        if args.fedsem_loss == 'ce':
+            loss_local = F.cross_entropy(output_local, target)
+        elif args.fedsem_loss == 'balanced':
+            # optional, to match FedETF's balanced loss in comparisons
+            loss_local = balanced_softmax_loss(output_local, target, node.sample_per_class)
+        else:
+            raise ValueError('Undefined fedsem loss...')
 
         loss_local.backward()
         loss = loss + loss_local.item()

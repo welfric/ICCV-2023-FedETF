@@ -64,6 +64,24 @@ def args_parser():
     parser.add_argument('--scaling_train', type=float, default=1.0,
                         help="scaling hyperparameter for training")
 
+    # For FedSem (fixed semantic classifier from CLIP text embeddings)
+    parser.add_argument('--fedsem_lambda', type=float, default=0.5,
+                        help="blend between the simplex ETF (0) and the centred CLIP geometry (1)")
+    parser.add_argument('--fedsem_scale', type=float, default=10.0,
+                        help="fixed logit scale s")
+    parser.add_argument('--fedsem_shuffle', type=int, default=0,
+                        help="set 1 for the shuffled-anchor control (random permutation of the anchors)")
+    parser.add_argument('--fedsem_learnable', type=int, default=0,
+                        help="set 1 to unfreeze the anchors (learnable-head control)")
+    parser.add_argument('--fedsem_loss', type=str, default='ce',
+                        help="local loss: {ce, balanced}")
+    parser.add_argument('--clip_backend', type=str, default='openai',
+                        help="CLIP text encoder backend: {openai, hf}")
+    parser.add_argument('--clip_model', type=str, default=None,
+                        help="CLIP model name, defaults to ViT-B/32 (openai) or openai/clip-vit-base-patch32 (hf)")
+    parser.add_argument('--fedsem_text_emb', type=str, default='',
+                        help="cache file for the class-name text embeddings, loaded if it exists and written otherwise")
+
     args = parser.parse_args()
 
     return args

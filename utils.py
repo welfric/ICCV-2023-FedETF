@@ -91,7 +91,7 @@ def compute_globalmodel_neural_collapse(args, central_node):
     return avg_cosine
 
 def set_server_method(args):
-    if args.client_method in ['local_train', 'fedrod', 'fedprox', 'ditto', 'fedetf']:
+    if args.client_method in ['local_train', 'fedrod', 'fedprox', 'ditto', 'fedetf', 'fedsem']:
         args.server_method = 'fedavg'
     else:
         args.server_method = args.client_method
@@ -338,6 +338,9 @@ def validate(args, node, which_dataset = 'validate'):
             feature, logit, out = node.model(data)
             if 'fedetf' in args.client_method:
                 output = torch.matmul(feature, node.model.proto_classifier.proto)
+            elif args.client_method == 'fedsem':
+                # predict argmax_k t_k^T f(x)
+                output = node.model.semantic_classifier(feature)
             elif args.client_method == 'fedrod':
                 if which_dataset == 'validate':
                     # client local data

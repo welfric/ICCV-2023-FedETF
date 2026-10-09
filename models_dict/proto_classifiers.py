@@ -34,3 +34,25 @@ class Proto_Classifier(nn.Module):
         return target
 
 
+class Semantic_Classifier(nn.Module):
+    '''
+    FedSem classifier: anchors T_lambda (C x d) built once on the server, see fedsem.py
+    '''
+    def __init__(self, feat_in, num_classes, learnable=False):
+        super(Semantic_Classifier, self).__init__()
+        anchors = torch.zeros(num_classes, feat_in)
+        if learnable:
+            # control: unfreezing T_lambda gives a learnable head, trained and averaged like the other weights
+            self.anchors = nn.Parameter(anchors)
+        else:
+            # frozen: a non-persistent buffer is neither optimized nor in the state_dict, so aggregation never touches it
+            self.register_buffer('anchors', anchors, persistent=False)
+
+    def load_anchors(self, anchors):
+        self.anchors.data.copy_(anchors)
+
+    def forward(self, feature):
+        # B, d -> B, C: entry k is t_k^T f
+        return torch.matmul(feature, self.anchors.T)
+
+

@@ -9,6 +9,7 @@ from torch import nn
 from datasets import DatasetSplit
 from utils import init_model, PerturbedGradientDescent
 from utils import init_optimizer, model_parameter_vector
+from models_dict.proto_classifiers import Semantic_Classifier
 
 class Node(object):
 
@@ -38,6 +39,9 @@ class Node(object):
         
 
         self.model = init_model(self.args.local_model, self.args).cuda()
+        # semantic classifier for fedsem, the server fills in the anchors once (see main.py)
+        if args.client_method == 'fedsem':
+            self.model.semantic_classifier = Semantic_Classifier(self.model.linear_proto.out_features, self.num_classes, args.fedsem_learnable).cuda()
         self.optimizer = init_optimizer(self.num_id, self.model, args)
         
         # node init for feddyn

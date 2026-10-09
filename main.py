@@ -1,5 +1,6 @@
 
 import time
+import sys
 import torch
 from datasets import Data
 from nodes import Node
@@ -16,23 +17,29 @@ from pyhessian import hessian
 from server_funct import *
 import wandb
 from client_funct import *
+from fedsem import build_fedsem_anchors
 
 if __name__ == '__main__':
 
     args = args_parser()
 
     ##### Exp settings #####
-    ##### change it for different exps #####
-    args.client_method = 'fedetf'
-    args.exp_name = 'NCFL'
-    args.node_num = 20
-    args.iid = 0
-    args.random_seed = 10
-    args.dirichlet_alpha = 0.05
-    args.local_model = 'ResNet20' 
-    args.dataset = 'cifar10'
-    args.T = 200
-    args.E = 3
+    ##### change it for different exps, flags given on the command line take precedence #####
+    exp_settings = {
+        'client_method': 'fedetf',
+        'exp_name': 'NCFL',
+        'node_num': 20,
+        'iid': 0,
+        'random_seed': 10,
+        'dirichlet_alpha': 0.05,
+        'local_model': 'ResNet20',
+        'dataset': 'cifar10',
+        'T': 200,
+        'E': 3,
+    }
+    for key, value in exp_settings.items():
+        if not any(arg == '--' + key or arg.startswith('--' + key + '=') for arg in sys.argv[1:]):
+            setattr(args, key, value)
 
     # set the server method automatically
     args = set_server_method(args)
@@ -52,6 +59,9 @@ if __name__ == '__main__':
     
     setting_name =  args.exp_name + '_' + args.dataset + '_' + args.local_model + '_nodenum' + str(args.node_num) + '_dir' + str(args.dirichlet_alpha) +'_E'+ str(args.E)  + '_C' + str(args.select_ratio) \
     + '_' + args.server_method + '_' + args.client_method + '_seed' + str(args.random_seed)
+    if args.client_method == 'fedsem':
+        setting_name += '_lambda' + str(args.fedsem_lambda) + '_s' + str(args.fedsem_scale) + '_' + args.fedsem_loss \
+        + ('_shuffled' if args.fedsem_shuffle else '') + ('_learnable' if args.fedsem_learnable else '')
 
     root_path = '/code_root'
     output_path = 'results/date'
@@ -87,12 +97,19 @@ if __name__ == '__main__':
     # num_id equals to -1 stands for central node
     central_node = Node(-1, data.test_loader[0], data.test_set, args)
 
+    # fedsem: the server builds the anchors T_lambda once (Algorithm 1)
+    if args.client_method == 'fedsem':
+        anchors = build_fedsem_anchors(args, data.train_set, central_node.num_classes, central_node.model.linear_proto.out_features)
+        central_node.model.semantic_classifier.load_anchors(anchors)
 
     # initialize the client nodes
     client_nodes = {}
     for i in range(args.node_num): 
         client_nodes[i] = Node(i, data.train_loader[i], data.train_set, args) 
         client_nodes[i].model.load_state_dict(copy.deepcopy(central_node.model.state_dict()))
+        # fedsem: broadcast T_lambda once
+        if args.client_method == 'fedsem':
+            client_nodes[i].model.semantic_classifier.load_anchors(central_node.model.semantic_classifier.anchors)
 
     final_test_acc_recorder = RunningAverage()
     test_acc_recorder = []
@@ -141,6 +158,8 @@ if __name__ == '__main__':
             torch.save(central_node.model.state_dict(), os.path.join(root_path, output_path, setting_name+'_finalmodel.pth'))
             if 'fedetf' in args.client_method :
                 torch.save(central_node.model.proto_classifier.proto, os.path.join(root_path, output_path, setting_name+'_etfproto.pth'))
+            elif args.client_method == 'fedsem':
+                torch.save(central_node.model.semantic_classifier.anchors, os.path.join(root_path, output_path, setting_name+'_fedsemanchors.pth'))
 
     print('final_testacc', final_test_acc_recorder.value())
 

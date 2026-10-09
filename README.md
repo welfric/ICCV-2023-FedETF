@@ -34,7 +34,42 @@
   CCVR: {'server_method': 'ccvr', 'client_method': 'ccvr'}.
   FedRep: {'server_method': 'fedrep', 'client_method': 'fedrep'}.
   Ditto: {'server_method': 'fedavg', 'client_method': 'ditto'}.
+  FedSem: {'server_method': 'fedavg', 'client_method': 'fedsem'}.
   ```
+- The values in the ''_Exp settings_'' block of ''_main.py_'' are used unless the same flag is given on the command line.
+
+---
+## FedSem: fixed semantic classifier from CLIP text embeddings
+FedSem keeps FedETF's idea of a fixed classifier but chooses its geometry with class semantics. The server builds the anchors once (``fedsem.py``):
+1. Encode every class name with a frozen CLIP text encoder under CLIP's 18 CIFAR prompt templates and average the normalized embeddings, giving $u_k$.
+2. Centre and renormalize, $v_k = (u_k - \bar u)/\lVert u_k - \bar u\rVert$, to undo CLIP's narrow cone, and form $G_{sem} = VV^\top$.
+3. Blend with the simplex ETF Gram matrix: $G_\lambda = (1-\lambda) G_{etf} + \lambda G_{sem}$ (PSD with unit diagonal).
+4. Factorize $G_\lambda = Q\Lambda Q^\top$ and set $T_\lambda = [Q\Lambda^{1/2}\ 0] R$ with a fixed random rotation $R$, so every anchor has unit norm and $T_\lambda T_\lambda^\top = G_\lambda$.
+
+Clients receive $T_\lambda$ once and never run CLIP. They train only the backbone and the projector with cross-entropy on $z = s\,T_\lambda f(x)$, where $f(x)$ is the unit-norm projected feature, and the server runs FedAvg. Prediction is $\arg\max_k t_k^\top f(x)$. The anchors are frozen exactly: they are a non-persistent buffer, so neither the optimizer nor the aggregation touches them.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| ``--fedsem_lambda`` | 0.5 | 0 gives a fixed simplex ETF, 1 gives centred CLIP anchors |
+| ``--fedsem_scale`` | 10.0 | fixed logit scale $s$ |
+| ``--fedsem_shuffle`` | 0 | 1 uses $\Pi T_\lambda$ for a random permutation $\Pi$ (same geometry, wrong classes) |
+| ``--fedsem_learnable`` | 0 | 1 unfreezes $T_\lambda$, which is then trained and averaged like the other weights |
+| ``--fedsem_loss`` | ce | ``balanced`` uses FedETF's balanced softmax loss instead, for like-for-like comparisons |
+| ``--clip_backend`` | openai | ``openai`` (``pip install git+https://github.com/openai/CLIP.git``) or ``hf`` (``pip install transformers``) |
+| ``--clip_model`` | ViT-B/32 | CLIP model name for the chosen backend (``openai/clip-vit-base-patch32`` for ``hf``) |
+| ``--fedsem_text_emb`` | (none) | cache file for the class-name embeddings, loaded if it exists and written otherwise |
+
+CLIP is only needed when ``--fedsem_lambda`` > 0 and the cache file does not exist yet. The anchor dimension is the model's projector width and must be at least the number of classes. ``E`` counts local epochs, as for every other method in this codebase.
+
+Controls that isolate the value of the semantics (same seed, data partition and participation schedule):
+```
+python main.py --client_method fedsem --fedsem_lambda 0.5                       # semantic anchors
+python main.py --client_method fedsem --fedsem_lambda 0.5 --fedsem_shuffle 1    # shuffled anchors at the same lambda
+python main.py --client_method fedsem --fedsem_lambda 0                         # fixed ETF (FedETF's core)
+python main.py --client_method fedsem --fedsem_lambda 0.5 --fedsem_learnable 1  # learnable head initialized at T_lambda
+python main.py --client_method local_train                                      # FedAvg with its usual linear head
+```
+The rotation $R$ and the permutation $\Pi$ come from a generator seeded with ``--random_seed``, and encoding with CLIP leaves the global random state untouched, so these runs differ only in the classifier.
   
 ---
 ## Citing This Repository
