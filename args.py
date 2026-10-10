@@ -64,6 +64,8 @@ def args_parser():
     # For FedETF
     parser.add_argument('--scaling_train', type=float, default=1.0,
                         help="scaling hyperparameter for training")
+    parser.add_argument('--fedetf_anchors', type=str, default='etf',
+                        help="fixed classifier of fedetf: {etf, semantic}; semantic uses the FedSem anchors T_lambda (--fedsem_* and --clip_* flags) with everything else unchanged")
 
     # For FedSem (fixed semantic classifier from CLIP text embeddings)
     parser.add_argument('--fedsem_lambda', type=float, default=0.5,

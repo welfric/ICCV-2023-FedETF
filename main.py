@@ -41,6 +41,7 @@ if __name__ == '__main__':
         if not any(arg == '--' + key or arg.startswith('--' + key + '=') for arg in sys.argv[1:]):
             setattr(args, key, value)
 
+    assert args.fedetf_anchors in ['etf', 'semantic'], 'Undefined fedetf anchors...'
     # set the server method automatically
     args = set_server_method(args)
     # set the random seed for controlling the randomness
@@ -59,6 +60,8 @@ if __name__ == '__main__':
     
     setting_name =  args.exp_name + '_' + args.dataset + '_' + args.local_model + '_nodenum' + str(args.node_num) + '_dir' + str(args.dirichlet_alpha) +'_E'+ str(args.E)  + '_C' + str(args.select_ratio) \
     + '_' + args.server_method + '_' + args.client_method + '_seed' + str(args.random_seed)
+    if args.client_method == 'fedetf' and args.fedetf_anchors == 'semantic':
+        setting_name += '_semantic_lambda' + str(args.fedsem_lambda) + ('_shuffled' if args.fedsem_shuffle else '')
     if args.client_method == 'fedsem':
         setting_name += '_lambda' + str(args.fedsem_lambda) + '_s' + str(args.fedsem_scale) + '_' + args.fedsem_loss \
         + ('_shuffled' if args.fedsem_shuffle else '') + ('_learnable' if args.fedsem_learnable else '')
@@ -101,6 +104,10 @@ if __name__ == '__main__':
     if args.client_method == 'fedsem':
         anchors = build_fedsem_anchors(args, data.train_set, central_node.num_classes, central_node.model.linear_proto.out_features)
         central_node.model.semantic_classifier.load_anchors(anchors)
+    # fedetf with semantic anchors: T_lambda replaces the random ETF, the clients copy it from the server every round
+    elif args.client_method == 'fedetf' and args.fedetf_anchors == 'semantic':
+        anchors = build_fedsem_anchors(args, data.train_set, central_node.num_classes, central_node.model.proto_classifier.proto.shape[0])
+        central_node.model.proto_classifier.load_proto(anchors.T.contiguous().cuda())
 
     # initialize the client nodes
     client_nodes = {}

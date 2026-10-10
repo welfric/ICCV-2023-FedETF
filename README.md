@@ -69,6 +69,7 @@ python main.py --client_method fedsem --fedsem_lambda 0                         
 python main.py --client_method fedsem --fedsem_lambda 0.5 --fedsem_learnable 1  # learnable head initialized at T_lambda
 python main.py --client_method local_train                                      # FedAvg with its usual linear head
 ```
+To compare anchors and nothing else, FedETF can run with the semantic anchors in place of its random ETF: ``--client_method fedetf --fedetf_anchors semantic`` (with ``--fedsem_lambda``, ``--fedsem_shuffle``, ``--clip_*`` and ``--fedsem_text_emb`` as above). Its balanced loss, learnable temperature, aggregation and personalization are unchanged, so it differs from ``--client_method fedetf`` only in the fixed classifier.
 With ``--fedsem_lambda 0`` FedSem is FedETF's fixed ETF classifier without its extras (learnable temperature, balanced loss, alternating personalization of the proto and projection layer), so it is the like-for-like geometry arm; ``--client_method fedetf`` remains the full FedETF baseline. The shuffled control draws a permutation with no fixed points, so every class gets another class's anchor.
 The rotation $R$ and the permutation $\Pi$ come from a generator seeded with ``--random_seed``, and encoding with CLIP leaves the global random state untouched, so these runs differ only in the classifier.
   
