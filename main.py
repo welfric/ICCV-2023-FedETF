@@ -43,6 +43,7 @@ if __name__ == '__main__':
 
     assert args.fedetf_anchors in ['etf', 'semantic'], 'Undefined fedetf anchors...'
     assert args.fedetf_loss in ['balanced', 'ce'], 'Undefined fedetf loss...'
+    assert args.fedsem_margin >= 0, 'the semantic margin must be >= 0'
     assert args.scenario in ['standard', 'one_class'], 'Undefined scenario...'
     # set the server method automatically
     args = set_server_method(args)
@@ -66,6 +67,8 @@ if __name__ == '__main__':
         setting_name += '_semantic_lambda' + str(args.fedsem_lambda) + ('_shuffled' if args.fedsem_shuffle else '')
     if args.client_method == 'fedetf' and args.fedetf_loss == 'ce':
         setting_name += '_ce'
+    if args.client_method == 'fedetf' and args.fedsem_margin > 0:
+        setting_name += '_margin' + str(args.fedsem_margin)
     if args.scenario == 'one_class':
         setting_name += '_oneclass'
     if args.client_method == 'fedsem':

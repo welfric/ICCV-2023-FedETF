@@ -71,6 +71,8 @@ def args_parser():
                         help="fixed classifier of fedetf: {etf, semantic}; semantic uses the FedSem anchors T_lambda (--fedsem_* and --clip_* flags) with everything else unchanged")
     parser.add_argument('--fedetf_loss', type=str, default='balanced',
                         help="local loss of fedetf: {balanced, ce}")
+    parser.add_argument('--fedsem_margin', type=float, default=0.0,
+                        help="fedetf local training: add margin * max(0, t_y^T t_j) to the logit of every class j != y (no effect with the ETF, whose anchor cosines are all negative)")
     parser.add_argument('--personalize', type=int, default=1,
                         help="set 0 to skip the local finetuning (personalization) after the last round")
 

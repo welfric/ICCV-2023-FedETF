@@ -52,7 +52,7 @@ def Client_update(args, client_nodes, central_node, select_list):
         for i in select_list:
             epoch_losses = []
             for epoch in range(args.E):
-                loss = client_fedetf(args, client_nodes[i], opt = 'celoss' if args.fedetf_loss == 'ce' else 'balancedloss')
+                loss = client_fedetf(args, client_nodes[i], opt = 'celoss' if args.fedetf_loss == 'ce' else 'balancedloss', margin = args.fedsem_margin)
                 epoch_losses.append(loss)
             client_losses.append(sum(epoch_losses)/len(epoch_losses))
             train_loss = sum(client_losses)/len(client_losses)
@@ -260,7 +260,17 @@ def balanced_softmax_loss(logits, labels, sample_per_class, reduction="mean"):
     return loss
 
 
-def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0):
+def semantic_margin(proto, target, margin):
+    '''
+    margin * max(0, t_y^T t_j) added to the logit of every class j != y: the closer an anchor is to the true one, the
+    larger the gap the feature must keep from it; anchors with cosine <= 0 (all pairs of the simplex ETF) get no margin
+    '''
+    G = torch.matmul(proto.T, proto).detach().clamp(min=0)
+    G.fill_diagonal_(0)
+    return margin * G[target]
+
+
+def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0, margin = 0.0):
     node.model.train()
 
     loss = 0.0
@@ -274,6 +284,9 @@ def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0):
         feature, _, _ = node.model(data)
 
         output_local = torch.matmul(feature, node.model.proto_classifier.proto)
+        if margin > 0:
+            # training only, predictions stay argmax_k t_k^T f
+            output_local = output_local + semantic_margin(node.model.proto_classifier.proto, target, margin)
         output_local = node.model.scaling_train * output_local
 
         if opt == 'balancedloss':
