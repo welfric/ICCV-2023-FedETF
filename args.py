@@ -14,6 +14,9 @@ def args_parser():
                         help="batchsize")
     parser.add_argument('--dirichlet_alpha', type=float, default=0.5, 
                     help="dirichlet_alpha")
+    parser.add_argument('--scenario', type=str, default='standard',
+                        help="{standard, one_class}; one_class: node_num = number of classes, client k trains on every training image of class k "
+                             "and tests on the test images of class k and of its nearest class under the centred CLIP geometry (needs the CLIP text embeddings)")
 
     # System
     parser.add_argument('--device', type=str, default='1',
@@ -66,6 +69,10 @@ def args_parser():
                         help="scaling hyperparameter for training")
     parser.add_argument('--fedetf_anchors', type=str, default='etf',
                         help="fixed classifier of fedetf: {etf, semantic}; semantic uses the FedSem anchors T_lambda (--fedsem_* and --clip_* flags) with everything else unchanged")
+    parser.add_argument('--fedetf_loss', type=str, default='balanced',
+                        help="local loss of fedetf: {balanced, ce}")
+    parser.add_argument('--personalize', type=int, default=1,
+                        help="set 0 to skip the local finetuning (personalization) after the last round")
 
     # For FedSem (fixed semantic classifier from CLIP text embeddings)
     parser.add_argument('--fedsem_lambda', type=float, default=0.5,

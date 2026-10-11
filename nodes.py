@@ -13,7 +13,7 @@ from models_dict.proto_classifiers import Semantic_Classifier
 
 class Node(object):
 
-    def __init__(self, num_id, local_data, train_set, args):
+    def __init__(self, num_id, local_data, train_set, args, test_data=None):
         self.num_id = num_id
         self.args = args
         self.node_num = self.args.node_num
@@ -29,7 +29,12 @@ class Node(object):
         elif self.args.dataset == 'tinyimagenet':
             self.num_classes = 200
 
-        if args.iid == 1 or num_id == -1:
+        if test_data is not None:
+            # one_class scenario: train on all the local data and test on the given split instead of a 30% holdout
+            self.local_data = DataLoader(DatasetSplit(train_set, local_data), batch_size=self.args.batchsize, num_workers=0, shuffle=True)
+            self.validate_set = DataLoader(test_data, batch_size=self.args.validate_batchsize, num_workers=0, shuffle=False)
+            self.sample_per_class = self.generate_sample_per_class(self.local_data)
+        elif args.iid == 1 or num_id == -1:
             # for the server, use the validate_set as the training data, and use local_data for testing
             self.local_data, self.validate_set = self.train_val_split_forServer(local_data.indices, train_set, self.valid_ratio, self.num_classes)
         else:

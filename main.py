@@ -17,7 +17,7 @@ from pyhessian import hessian
 from server_funct import *
 import wandb
 from client_funct import *
-from fedsem import build_fedsem_anchors
+from fedsem import build_fedsem_anchors, load_text_emb, semantic_neighbours
 
 if __name__ == '__main__':
 
@@ -42,6 +42,8 @@ if __name__ == '__main__':
             setattr(args, key, value)
 
     assert args.fedetf_anchors in ['etf', 'semantic'], 'Undefined fedetf anchors...'
+    assert args.fedetf_loss in ['balanced', 'ce'], 'Undefined fedetf loss...'
+    assert args.scenario in ['standard', 'one_class'], 'Undefined scenario...'
     # set the server method automatically
     args = set_server_method(args)
     # set the random seed for controlling the randomness
@@ -62,6 +64,10 @@ if __name__ == '__main__':
     + '_' + args.server_method + '_' + args.client_method + '_seed' + str(args.random_seed)
     if args.client_method == 'fedetf' and args.fedetf_anchors == 'semantic':
         setting_name += '_semantic_lambda' + str(args.fedsem_lambda) + ('_shuffled' if args.fedsem_shuffle else '')
+    if args.client_method == 'fedetf' and args.fedetf_loss == 'ce':
+        setting_name += '_ce'
+    if args.scenario == 'one_class':
+        setting_name += '_oneclass'
     if args.client_method == 'fedsem':
         setting_name += '_lambda' + str(args.fedsem_lambda) + '_s' + str(args.fedsem_scale) + '_' + args.fedsem_loss \
         + ('_shuffled' if args.fedsem_shuffle else '') + ('_learnable' if args.fedsem_learnable else '')
@@ -109,10 +115,20 @@ if __name__ == '__main__':
         anchors = build_fedsem_anchors(args, data.train_set, central_node.num_classes, central_node.model.proto_classifier.proto.shape[0])
         central_node.model.proto_classifier.load_proto(anchors.T.contiguous().cuda())
 
+    # one_class scenario: client k tests on class k and its nearest class under the centred CLIP geometry
+    client_test = {i: None for i in range(args.node_num)}
+    if args.scenario == 'one_class':
+        neighbours = semantic_neighbours(load_text_emb(args, data.train_set, central_node.num_classes))
+        client_test = data.build_one_class_tests(neighbours)
+        class_names = list(data.train_set.classes)
+        for k, neighbour in enumerate(neighbours):
+            print('client {}: trains on {}, tests on {} + {}'.format(k, class_names[k], class_names[k], class_names[neighbour]))
+        global_cm_recorder, local_cm_recorder = [], []
+
     # initialize the client nodes
     client_nodes = {}
     for i in range(args.node_num): 
-        client_nodes[i] = Node(i, data.train_loader[i], data.train_set, args) 
+        client_nodes[i] = Node(i, data.train_loader[i], data.train_set, args, client_test[i]) 
         client_nodes[i].model.load_state_dict(copy.deepcopy(central_node.model.state_dict()))
         # fedsem: broadcast T_lambda once
         if args.client_method == 'fedsem':
@@ -141,12 +157,26 @@ if __name__ == '__main__':
 
         # Local update
         client_nodes, train_loss = Client_update(args, client_nodes, central_node, select_list)
-        avg_client_acc = Client_validate(args, client_nodes, select_list)
+        if args.scenario == 'one_class':
+            # local models after local training, on their own class and its neighbour
+            local_cm = torch.stack([confusion_matrix(args, client_nodes[i]) for i in select_list])
+            local_cm_recorder.append(local_cm)
+            avg_client_acc = sum(cm.diag().sum().item() / cm.sum().item() * 100 for cm in local_cm) / len(select_list)
+        else:
+            avg_client_acc = Client_validate(args, client_nodes, select_list)
         print(args.server_method + args.client_method + ', averaged clients acc is ', avg_client_acc)
         
         # Server aggregation
         central_node = Server_update(args, central_node, client_nodes, select_list, size_weights)
-        acc = validate(args, central_node, which_dataset = 'local')
+        if args.scenario == 'one_class':
+            global_cm = confusion_matrix(args, central_node, which_dataset = 'local')
+            global_cm_recorder.append(global_cm)
+            acc = global_cm.diag().sum().item() / global_cm.sum().item() * 100
+            own = [local_cm[n, i, i].item() / local_cm[n, i].sum().item() * 100 for n, i in enumerate(select_list)]
+            neighbour = [local_cm[n, neighbours[i], neighbours[i]].item() / local_cm[n, neighbours[i]].sum().item() * 100 for n, i in enumerate(select_list)]
+            print('local models: own class acc {:.2f}, neighbour class acc {:.2f}'.format(np.mean(own), np.mean(neighbour)))
+        else:
+            acc = validate(args, central_node, which_dataset = 'local')
         print(args.server_method + args.client_method + ', global model test acc is ', acc)
 
         # Recorder
@@ -171,13 +201,19 @@ if __name__ == '__main__':
     print('final_testacc', final_test_acc_recorder.value())
 
     # Local finetuning: personalization process
-    select_list = [idx for idx in range(len(client_nodes))]
-    client_nodes, train_loss = Client_personalization(args, client_nodes, central_node, select_list)
-    avg_client_acc = Client_validate(args, client_nodes, select_list)
-    print(args.server_method + args.client_method + ', personalization acc is ', avg_client_acc)
+    if args.personalize:
+        select_list = [idx for idx in range(len(client_nodes))]
+        client_nodes, train_loss = Client_personalization(args, client_nodes, central_node, select_list)
+        avg_client_acc = Client_validate(args, client_nodes, select_list)
+        print(args.server_method + args.client_method + ', personalization acc is ', avg_client_acc)
+    else:
+        avg_client_acc = None
 
     # save the final result
     final_results = {'final_testacc': final_test_acc_recorder.value(), 'final_peracc': avg_client_acc}
+    if args.scenario == 'one_class':
+        torch.save({'class_names': class_names, 'neighbours': neighbours, 'global_cm': torch.stack(global_cm_recorder),
+                    'local_cm': torch.stack(local_cm_recorder)}, os.path.join(root_path, output_path, setting_name+'_confusion.pth'))
     try:
         wandb.log(final_results)
     except:

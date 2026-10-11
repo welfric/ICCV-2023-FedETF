@@ -112,31 +112,49 @@ def semantic_etf_anchors(num_classes, dim, lam, text_emb=None, shuffle=False, se
     return T.float()
 
 
+def load_text_emb(args, train_set, num_classes):
+    '''
+    server side: prompt-ensembled CLIP embeddings u_k of the class names, read from / written to the --fedsem_text_emb cache
+    '''
+    class_names = get_class_names(train_set)
+    if args.fedsem_text_emb and os.path.exists(args.fedsem_text_emb):
+        cache = torch.load(args.fedsem_text_emb)
+        assert (cache['class_names'], cache['templates'], cache['clip_backend'], cache['clip_model']) == (class_names, CLIP_TEMPLATES, args.clip_backend, args.clip_model), \
+            'cached text embeddings were computed with different class names, templates or CLIP model'
+        text_emb = cache['text_emb']
+    else:
+        # keep the RNG stream identical with and without CLIP (e.g. lambda = 0 vs. lambda > 0, cache hit vs. miss)
+        with torch.random.fork_rng():
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            text_emb = encode_class_names(class_names, CLIP_TEMPLATES, args.clip_backend, args.clip_model, device)
+        if args.fedsem_text_emb:
+            # write then rename, so parallel runs never read a half-written cache
+            tmp_path = '{}.{}.tmp'.format(args.fedsem_text_emb, os.getpid())
+            torch.save({'class_names': class_names, 'templates': CLIP_TEMPLATES, 'clip_backend': args.clip_backend,
+                        'clip_model': args.clip_model, 'text_emb': text_emb}, tmp_path)
+            os.replace(tmp_path, args.fedsem_text_emb)
+    assert text_emb.shape[0] == num_classes
+    return text_emb
+
+
+def semantic_neighbours(text_emb):
+    '''
+    nearest other class of every class under the centred CLIP geometry G_sem (the lambda = 1 anchors)
+    '''
+    v = text_emb.double()
+    v = v - v.mean(dim=0, keepdim=True)
+    v = v / v.norm(dim=1, keepdim=True)
+    G = torch.matmul(v, v.T)
+    G.fill_diagonal_(-2)
+    return G.argmax(dim=1).tolist()
+
+
 def build_fedsem_anchors(args, train_set, num_classes, dim):
     '''
     server side, once: clients never run CLIP, they only receive the C x d anchor matrix
     '''
     assert args.fedsem_scale > 0, 'FedSem needs a logit scale s > 0'
-    text_emb = None
-    if args.fedsem_lambda > 0:
-        class_names = get_class_names(train_set)
-        if args.fedsem_text_emb and os.path.exists(args.fedsem_text_emb):
-            cache = torch.load(args.fedsem_text_emb)
-            assert (cache['class_names'], cache['templates'], cache['clip_backend'], cache['clip_model']) == (class_names, CLIP_TEMPLATES, args.clip_backend, args.clip_model), \
-                'cached text embeddings were computed with different class names, templates or CLIP model'
-            text_emb = cache['text_emb']
-        else:
-            # keep the RNG stream identical with and without CLIP (e.g. lambda = 0 vs. lambda > 0, cache hit vs. miss)
-            with torch.random.fork_rng():
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                text_emb = encode_class_names(class_names, CLIP_TEMPLATES, args.clip_backend, args.clip_model, device)
-            if args.fedsem_text_emb:
-                # write then rename, so parallel runs never read a half-written cache
-                tmp_path = '{}.{}.tmp'.format(args.fedsem_text_emb, os.getpid())
-                torch.save({'class_names': class_names, 'templates': CLIP_TEMPLATES, 'clip_backend': args.clip_backend,
-                            'clip_model': args.clip_model, 'text_emb': text_emb}, tmp_path)
-                os.replace(tmp_path, args.fedsem_text_emb)
-        assert text_emb.shape[0] == num_classes
+    text_emb = load_text_emb(args, train_set, num_classes) if args.fedsem_lambda > 0 else None
 
     anchors = semantic_etf_anchors(num_classes, dim, args.fedsem_lambda, text_emb, bool(args.fedsem_shuffle), args.random_seed)
 

@@ -312,6 +312,26 @@ class Data(object):
             )
             self.test_loader = torch.utils.data.random_split(self.test_set, [int(len(self.test_set))])
 
+        # one class per client: client k gets every training image of class k
+        if args.scenario == 'one_class':
+            self.train_loader = build_one_class_per_client(self.train_set, node_num)
+            self.groups = self.train_loader
+
+    def build_one_class_tests(self, neighbours):
+        '''
+        one_class scenario: the test set of client k holds the test images of class k and of its semantic neighbour
+        '''
+        test_targets = np.array([int(target) for target in self.test_set.targets])
+        return {k: DatasetSplit(self.test_set, np.where(np.isin(test_targets, [k, neighbour]))[0].tolist())
+                for k, neighbour in enumerate(neighbours)}
+
+
+def build_one_class_per_client(dataset, n_workers):
+    targets = np.array([int(target) for target in dataset.targets])
+    num_classes = int(targets.max()) + 1
+    assert n_workers == num_classes, 'the one_class scenario needs node_num = number of classes ({}), got {}'.format(num_classes, n_workers)
+    return {k: np.where(targets == k)[0].tolist() for k in range(num_classes)}
+
 
 def build_non_iid_by_dirichlet(
     random_state = np.random.RandomState(0), dataset = 0, non_iid_alpha = 10, num_classes = 10, num_indices = 60000, n_workers = 10

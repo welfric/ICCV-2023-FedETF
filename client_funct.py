@@ -52,7 +52,7 @@ def Client_update(args, client_nodes, central_node, select_list):
         for i in select_list:
             epoch_losses = []
             for epoch in range(args.E):
-                loss = client_fedetf(args, client_nodes[i])
+                loss = client_fedetf(args, client_nodes[i], opt = 'celoss' if args.fedetf_loss == 'ce' else 'balancedloss')
                 epoch_losses.append(loss)
             client_losses.append(sum(epoch_losses)/len(epoch_losses))
             train_loss = sum(client_losses)/len(client_losses)

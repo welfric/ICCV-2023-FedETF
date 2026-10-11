@@ -319,6 +319,40 @@ class PerturbedGradientDescent(Optimizer):
 # Validation function
 ##############################################################################
 
+def node_output(args, node, data, which_dataset = 'validate'):
+    '''
+    class scores of node's model on a batch, the argmax is the prediction
+    '''
+    feature, logit, out = node.model(data)
+    if 'fedetf' in args.client_method:
+        output = torch.matmul(feature, node.model.proto_classifier.proto)
+    elif args.client_method == 'fedsem':
+        # predict argmax_k t_k^T f(x)
+        output = node.model.semantic_classifier(feature)
+    elif args.client_method == 'fedrod':
+        if which_dataset == 'validate':
+            # client local data
+            logit_p = node.p_head(out)
+            output = logit + logit_p
+        else:
+            # server-side testset
+            output = logit
+    elif args.client_method == 'fednh':
+        feature = out
+        feature_norm = torch.norm(feature, p=2, dim=1, keepdim=True).clamp(min=1e-12)
+        feature_embedding = torch.div(feature, feature_norm)
+        normalized_prototype = node.prototype
+        logits = torch.matmul(feature_embedding, normalized_prototype.T)
+        output = logits
+    elif args.client_method == 'ditto':
+        if which_dataset == 'validate':
+            # client local data
+            _, logit, _ = node.p_model(data)
+        output = logit
+    else:
+        output = logit
+    return output
+
 def validate(args, node, which_dataset = 'validate'):
     '''
     Generally, 'validate' refers to the local datasets of clients and 'local' refers to the server's testset.
@@ -335,39 +369,25 @@ def validate(args, node, which_dataset = 'validate'):
     with torch.no_grad():
         for idx, (data, target) in enumerate(test_loader):
             data, target = data.cuda(), target.cuda()
-            feature, logit, out = node.model(data)
-            if 'fedetf' in args.client_method:
-                output = torch.matmul(feature, node.model.proto_classifier.proto)
-            elif args.client_method == 'fedsem':
-                # predict argmax_k t_k^T f(x)
-                output = node.model.semantic_classifier(feature)
-            elif args.client_method == 'fedrod':
-                if which_dataset == 'validate':
-                    # client local data
-                    logit_p = node.p_head(out)
-                    output = logit + logit_p
-                else:
-                    # server-side testset
-                    output = logit
-            elif args.client_method == 'fednh':
-                feature = out
-                feature_norm = torch.norm(feature, p=2, dim=1, keepdim=True).clamp(min=1e-12)
-                feature_embedding = torch.div(feature, feature_norm)
-                normalized_prototype = node.prototype
-                logits = torch.matmul(feature_embedding, normalized_prototype.T)
-                output = logits
-            elif args.client_method == 'ditto':
-                if which_dataset == 'validate':
-                    # client local data
-                    _, logit, _ = node.p_model(data)
-                output = logit
-            else:
-                output = logit
+            output = node_output(args, node, data, which_dataset)
 
             pred = output.argmax(dim=1)
             correct += pred.eq(target.view_as(pred)).sum().item()
         acc = correct / len(test_loader.dataset) * 100
     return acc
+
+def confusion_matrix(args, node, which_dataset = 'validate'):
+    '''
+    C x C counts, entry [i, j] is the number of test samples of class i predicted as class j (same datasets as validate)
+    '''
+    node.model.cuda().eval()
+    test_loader = node.validate_set if which_dataset == 'validate' else node.local_data
+    cm = torch.zeros(node.num_classes, node.num_classes, dtype=torch.long)
+    with torch.no_grad():
+        for idx, (data, target) in enumerate(test_loader):
+            pred = node_output(args, node, data.cuda(), which_dataset).argmax(dim=1).cpu()
+            cm += torch.bincount(target * node.num_classes + pred, minlength=node.num_classes ** 2).view(node.num_classes, node.num_classes)
+    return cm
 
 def testloss(args, node, which_dataset = 'validate'):
     node.model.cuda().eval()  
