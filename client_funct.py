@@ -58,7 +58,7 @@ def Client_update(args, client_nodes, central_node, select_list):
                     param.requires_grad = False
             epoch_losses = []
             for epoch in range(args.E):
-                loss = client_fedetf(args, client_nodes[i], opt = 'celoss' if args.fedetf_loss == 'ce' else 'balancedloss', margin = args.fedsem_margin, ntd_model = ntd_model)
+                loss = client_fedetf(args, client_nodes[i], opt = 'celoss' if args.fedetf_loss == 'ce' else 'balancedloss', margin = args.fedsem_margin, ntd_model = ntd_model, align = args.fedsem_align)
                 epoch_losses.append(loss)
             client_losses.append(sum(epoch_losses)/len(epoch_losses))
             train_loss = sum(client_losses)/len(client_losses)
@@ -288,7 +288,7 @@ def not_true_distillation(logits, global_logits, target, tau):
     return tau ** 2 * F.kl_div(local, teacher, reduction='batchmean')
 
 
-def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0, margin = 0.0, ntd_model = None):
+def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0, margin = 0.0, ntd_model = None, align = 0.0):
     node.model.train()
 
     loss = 0.0
@@ -320,6 +320,11 @@ def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0, margin = 0.0, nt
                 global_logits = ntd_model.scaling_train * torch.matmul(global_feature, ntd_model.proto_classifier.proto)
             local_logits = node.model.scaling_train * torch.matmul(feature, node.model.proto_classifier.proto)
             loss_local = loss_local + args.ntd_beta * not_true_distillation(local_logits, global_logits, target, args.ntd_tau)
+
+        if align > 0:
+            # soft pull towards the own anchor, 1/2 (1 - t_y^T f)^2 (dot regression, Yang et al. NeurIPS 2022); f and t_y are unit vectors
+            own_anchor = node.model.proto_classifier.proto[:, target].T
+            loss_local = loss_local + align * 0.5 * ((1 - (feature * own_anchor).sum(dim=1)) ** 2).mean()
 
         loss_local.backward()
         loss = loss + loss_local.item()

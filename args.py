@@ -81,6 +81,8 @@ def args_parser():
                         help="fedetf: weight of FedNTD's not-true distillation from the downloaded global model (0 = off; FedNTD uses 1)")
     parser.add_argument('--ntd_tau', type=float, default=1.0,
                         help="fedetf: softmax temperature of the not-true distillation (FedNTD's config uses 1)")
+    parser.add_argument('--fedsem_align', type=float, default=0.0,
+                        help="fedetf: weight beta of a soft pull of each feature towards its own anchor, beta * 1/2 (1 - t_y^T f)^2 (the dot-regression loss of Yang et al., NeurIPS 2022, added as a penalty); 0 = off")
     parser.add_argument('--scale_init', type=float, default=None,
                         help="start value of the learnable logit scale s (scaling_train) of fedetf; default keeps the model's own (1.0 for ResNet)")
     parser.add_argument('--scale_learnable', type=int, default=1,
