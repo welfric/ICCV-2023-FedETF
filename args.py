@@ -73,6 +73,10 @@ def args_parser():
                         help="local loss of fedetf: {balanced, ce}")
     parser.add_argument('--fedsem_margin', type=float, default=0.0,
                         help="fedetf local training: add margin * max(0, t_y^T t_j) to the logit of every class j != y (no effect with the ETF, whose anchor cosines are all negative)")
+    parser.add_argument('--ntd_beta', type=float, default=0.0,
+                        help="fedetf: weight of FedNTD's not-true distillation from the downloaded global model (0 = off; FedNTD uses 1)")
+    parser.add_argument('--ntd_tau', type=float, default=1.0,
+                        help="fedetf: softmax temperature of the not-true distillation (FedNTD's config uses 1)")
     parser.add_argument('--scale_init', type=float, default=None,
                         help="start value of the learnable logit scale s (scaling_train) of fedetf; default keeps the model's own (1.0 for ResNet)")
     parser.add_argument('--scale_learnable', type=int, default=1,

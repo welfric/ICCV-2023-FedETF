@@ -45,6 +45,7 @@ if __name__ == '__main__':
     assert args.fedetf_loss in ['balanced', 'ce'], 'Undefined fedetf loss...'
     assert args.fedsem_margin >= 0, 'the semantic margin must be >= 0'
     assert args.scale_init is None or args.scale_init > 0, 'the logit scale must be > 0'
+    assert args.ntd_beta >= 0 and args.ntd_tau > 0, 'FedNTD needs beta >= 0 and tau > 0'
     assert args.scenario in ['standard', 'one_class'], 'Undefined scenario...'
     # set the server method automatically
     args = set_server_method(args)
@@ -70,6 +71,8 @@ if __name__ == '__main__':
         setting_name += '_ce'
     if args.client_method == 'fedetf' and args.fedsem_margin > 0:
         setting_name += '_margin' + str(args.fedsem_margin)
+    if args.client_method == 'fedetf' and args.ntd_beta > 0:
+        setting_name += '_ntd' + str(args.ntd_beta) + '_tau' + str(args.ntd_tau)
     if args.scale_init is not None:
         setting_name += '_s' + str(args.scale_init)
     if not args.scale_learnable:

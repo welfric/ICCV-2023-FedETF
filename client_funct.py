@@ -50,9 +50,15 @@ def Client_update(args, client_nodes, central_node, select_list):
     elif 'fedetf' in args.client_method:
         client_losses = []
         for i in select_list:
+            # FedNTD: a frozen copy of the downloaded global model, the teacher for the not-true classes
+            ntd_model = None
+            if args.ntd_beta > 0:
+                ntd_model = copy.deepcopy(central_node.model).train()
+                for param in ntd_model.parameters():
+                    param.requires_grad = False
             epoch_losses = []
             for epoch in range(args.E):
-                loss = client_fedetf(args, client_nodes[i], opt = 'celoss' if args.fedetf_loss == 'ce' else 'balancedloss', margin = args.fedsem_margin)
+                loss = client_fedetf(args, client_nodes[i], opt = 'celoss' if args.fedetf_loss == 'ce' else 'balancedloss', margin = args.fedsem_margin, ntd_model = ntd_model)
                 epoch_losses.append(loss)
             client_losses.append(sum(epoch_losses)/len(epoch_losses))
             train_loss = sum(client_losses)/len(client_losses)
@@ -270,7 +276,19 @@ def semantic_margin(proto, target, margin):
     return margin * G[target]
 
 
-def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0, margin = 0.0):
+def not_true_distillation(logits, global_logits, target, tau):
+    '''
+    FedNTD (Lee et al., NeurIPS 2022): tau^2 * KL(global || local) between the softmaxes over the not-true classes,
+    so the local model keeps the global model's view of the classes other than the label
+    '''
+    not_true = torch.ones_like(logits, dtype=torch.bool).scatter_(1, target.unsqueeze(1), False)
+    num_not_true = logits.shape[1] - 1
+    local = F.log_softmax(logits[not_true].view(-1, num_not_true) / tau, dim=1)
+    teacher = F.softmax(global_logits[not_true].view(-1, num_not_true) / tau, dim=1)
+    return tau ** 2 * F.kl_div(local, teacher, reduction='batchmean')
+
+
+def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0, margin = 0.0, ntd_model = None):
     node.model.train()
 
     loss = 0.0
@@ -294,6 +312,14 @@ def client_fedetf(args, node, opt = 'balancedloss', loss = 0.0, margin = 0.0):
         elif opt == 'celoss':
             # For local personalization
             loss_local =  F.cross_entropy(output_local, target)
+
+        if ntd_model is not None:
+            # teacher in train mode, so both models normalise each batch the same way (BatchNorm)
+            with torch.no_grad():
+                global_feature, _, _ = ntd_model(data)
+                global_logits = ntd_model.scaling_train * torch.matmul(global_feature, ntd_model.proto_classifier.proto)
+            local_logits = node.model.scaling_train * torch.matmul(feature, node.model.proto_classifier.proto)
+            loss_local = loss_local + args.ntd_beta * not_true_distillation(local_logits, global_logits, target, args.ntd_tau)
 
         loss_local.backward()
         loss = loss + loss_local.item()
