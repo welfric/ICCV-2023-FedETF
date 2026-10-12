@@ -153,6 +153,7 @@ if __name__ == '__main__':
     else:
         select_list_recorder = torch.load(os.path.join(root_path, 'outputs/0915/','num'+ str(args.node_num)+'_ratio'+str(args.select_ratio)+ '_select_list_recorder.pth'))
 
+    save_client_rounds = {int(r) for r in args.save_client_rounds.split(',') if r.strip()}
     for rounds in range(args.T):
         print('===============Stage 1 The {:d}-th round==============='.format(rounds + 1))
         print(setting_name)
@@ -168,6 +169,10 @@ if __name__ == '__main__':
 
         # Local update
         client_nodes, train_loss = Client_update(args, client_nodes, central_node, select_list)
+        # diagnostics: client models after local training, before aggregation
+        if rounds + 1 in save_client_rounds:
+            torch.save({i: client_nodes[i].model.state_dict() for i in select_list},
+                       os.path.join(root_path, output_path, setting_name + '_clients_round{}.pth'.format(rounds + 1)))
         if args.scenario == 'one_class':
             # local models after local training, on their own class and its neighbour
             local_cm = torch.stack([confusion_matrix(args, client_nodes[i]) for i in select_list])
@@ -179,6 +184,9 @@ if __name__ == '__main__':
         
         # Server aggregation
         central_node = Server_update(args, central_node, client_nodes, select_list, size_weights)
+        # diagnostics: the global model after aggregation
+        if args.save_global_every and (rounds + 1) % args.save_global_every == 0:
+            torch.save(central_node.model.state_dict(), os.path.join(root_path, output_path, setting_name + '_global_round{}.pth'.format(rounds + 1)))
         if args.scenario == 'one_class':
             global_cm = confusion_matrix(args, central_node, which_dataset = 'local')
             global_cm_recorder.append(global_cm)

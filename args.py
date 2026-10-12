@@ -73,6 +73,10 @@ def args_parser():
                         help="local loss of fedetf: {balanced, ce}")
     parser.add_argument('--fedsem_margin', type=float, default=0.0,
                         help="fedetf local training: add margin * max(0, t_y^T t_j) to the logit of every class j != y (no effect with the ETF, whose anchor cosines are all negative)")
+    parser.add_argument('--save_global_every', type=int, default=0,
+                        help="diagnostics: save the global model every this many rounds (0 = off); does not change training")
+    parser.add_argument('--save_client_rounds', type=str, default='',
+                        help="diagnostics: comma-separated rounds after whose local training every client model is saved, e.g. '10,25,50'")
     parser.add_argument('--ntd_beta', type=float, default=0.0,
                         help="fedetf: weight of FedNTD's not-true distillation from the downloaded global model (0 = off; FedNTD uses 1)")
     parser.add_argument('--ntd_tau', type=float, default=1.0,
