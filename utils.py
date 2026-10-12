@@ -256,6 +256,12 @@ def init_model(model_type, args):
     elif model_type == 'LeNet5':
         model = cnn.LeNet5() 
 
+    # logit scale s of the fixed classifier: start value (default: the model's own) and whether it is learned
+    if hasattr(model, 'scaling_train'):
+        if args.scale_init is not None:
+            model.scaling_train.data.fill_(args.scale_init)
+        model.scaling_train.requires_grad = bool(args.scale_learnable)
+
     return model
 
 def init_optimizer(num_id, model, args):

@@ -73,6 +73,10 @@ def args_parser():
                         help="local loss of fedetf: {balanced, ce}")
     parser.add_argument('--fedsem_margin', type=float, default=0.0,
                         help="fedetf local training: add margin * max(0, t_y^T t_j) to the logit of every class j != y (no effect with the ETF, whose anchor cosines are all negative)")
+    parser.add_argument('--scale_init', type=float, default=None,
+                        help="start value of the learnable logit scale s (scaling_train) of fedetf; default keeps the model's own (1.0 for ResNet)")
+    parser.add_argument('--scale_learnable', type=int, default=1,
+                        help="set 0 to freeze the logit scale s at its start value")
     parser.add_argument('--personalize', type=int, default=1,
                         help="set 0 to skip the local finetuning (personalization) after the last round")
 
